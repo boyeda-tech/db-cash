@@ -285,6 +285,7 @@
   <div class="hdr">
     <button class="btn-back" onclick="backToAccueil()">← Tables</button>
     <div class="hdr-title" id="order-title">Table <span>1</span></div>
+    <button class="btn-back" style="color:var(--red);border-color:rgba(183,28,28,.35)" onclick="annulerTable()">Annuler</button>
   </div>
   <div class="covers-bar">
     <span class="covers-label">Couverts</span>
@@ -520,6 +521,20 @@ function openTable(n){
   renderOrder();showView('v-order');
 }
 function backToAccueil(){saveOpenTables();showView('v-accueil');renderTables();}
+function annulerTable(){
+  if(!CURRENT_ORDER)return;
+  const n=CURRENT_ORDER.tableNum;
+  const t=OPEN_TABLES[n];
+  const msg=t&&t.items.length
+    ?`Annuler la table ${n} et supprimer les ${t.items.length} article${t.items.length>1?'s':''}  ?`
+    :`Libérer la table ${n} ?`;
+  if(!confirm(msg))return;
+  delete OPEN_TABLES[n];
+  saveOpenTables();
+  showView('v-accueil');
+  renderTables();
+  toast(`Table ${n} libérée`);
+}
 function saveOpenTables(){localStorage.setItem('db_cash_tables',JSON.stringify(OPEN_TABLES));}
 function loadOpenTables(){const r=localStorage.getItem('db_cash_tables');if(r)try{OPEN_TABLES=JSON.parse(r);}catch(_){}}
 function changeCovers(d){if(!CURRENT_ORDER)return;const t=OPEN_TABLES[CURRENT_ORDER.tableNum];if(!t)return;t.covers=Math.max(1,t.covers+d);document.getElementById('covers-val').textContent=t.covers;}
