@@ -352,16 +352,14 @@
     <button class="btn-back" onclick="backToAccueil()">← Accueil</button>
     <div class="hdr-title">Ticket <span>n°<span id="ticket-num"></span></span></div>
   </div>
-  <div style="display:flex;gap:8px;padding:10px 16px 0;flex-shrink:0">
-    <button id="btn-detail-on"  onclick="setTicketDetail(true)"  style="flex:1;padding:9px;border-radius:8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;font-family:var(--serif);background:var(--gold);border:1.5px solid var(--gold);color:#fff">Avec détails</button>
-    <button id="btn-detail-off" onclick="setTicketDetail(false)" style="flex:1;padding:9px;border-radius:8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;font-family:var(--serif);background:none;border:1.5px solid var(--border-s);color:var(--txt2)">Sans détails</button>
-  </div>
   <div class="ticket-view">
     <div class="ticket-paper" id="ticket-paper"></div>
     <div class="ticket-btns">
-      <button class="btn-print" onclick="window.print()">🖨 Client</button>
-      <button class="btn-print" style="background:var(--txt2)" onclick="printExemplaire()">📋 Mon exemplaire</button>
+      <button class="btn-print" onclick="window.print()">🖨 Imprimer l'addition</button>
       <button class="btn-new" onclick="backToAccueil()">Nouvelle table</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;width:100%;max-width:360px">
+      <button onclick="printSansDetails()" style="flex:1;background:none;border:1.5px solid var(--border-s);color:var(--txt2);padding:11px;border-radius:8px;font-size:13px;font-family:var(--serif);cursor:pointer;letter-spacing:.04em">📄 Fiche sans détails</button>
     </div>
   </div>
 </div>
@@ -1006,7 +1004,7 @@ async function valider(ttc){
   SESSION_TICKETS.push(td);saveSessionTickets();
   await sbSave('db-cash',{tickets:SESSION_TICKETS,date:new Date().toDateString()});
   if(!CURRENT_ORDER.isEmporter)delete OPEN_TABLES[CURRENT_ORDER.tableNum];else EMP_CART=[];
-  saveOpenTables();TICKET_DETAIL=true;setTicketDetail(true);renderTicket(td);showView('v-ticket');
+  saveOpenTables();TICKET_DETAIL=true;renderTicket(td);showView('v-ticket');
 }
 
 function saveSessionTickets(){localStorage.setItem('db_cash_session',JSON.stringify({tickets:SESSION_TICKETS,date:new Date().toDateString()}));}
@@ -1028,28 +1026,14 @@ function loadSessionTickets(){
 // ═══════════════════════════════════════════════════
 // TICKET
 // ═══════════════════════════════════════════════════
-function printExemplaire(){
-  // Imprime toujours la version détaillée complète (pour la compta)
-  // même si le client a eu la version sans détails
-  const prev=TICKET_DETAIL;
-  TICKET_DETAIL=true;
+function printSansDetails(){
+  // Imprime une fiche simplifiée (total uniquement) sur demande du client
+  TICKET_DETAIL=false;
   renderTicket(LAST_TICKET);
   window.print();
-  // Remet l'affichage dans l'état précédent après impression
-  TICKET_DETAIL=prev;
+  // Remet l'affichage en version détaillée
+  TICKET_DETAIL=true;
   renderTicket(LAST_TICKET);
-  setTicketDetail(prev);
-}
-
-function setTicketDetail(withDetail){
-  TICKET_DETAIL=withDetail;
-  document.getElementById('btn-detail-on').style.background=withDetail?'var(--gold)':'none';
-  document.getElementById('btn-detail-on').style.color=withDetail?'#fff':'var(--txt2)';
-  document.getElementById('btn-detail-on').style.borderColor=withDetail?'var(--gold)':'var(--border-s)';
-  document.getElementById('btn-detail-off').style.background=withDetail?'none':'var(--gold)';
-  document.getElementById('btn-detail-off').style.color=withDetail?'var(--txt2)':'#fff';
-  document.getElementById('btn-detail-off').style.borderColor=withDetail?'var(--border-s)':'var(--gold)';
-  if(LAST_TICKET)renderTicket(LAST_TICKET);
 }
 
 function renderTicket(t){
