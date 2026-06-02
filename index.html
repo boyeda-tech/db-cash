@@ -987,11 +987,13 @@ async function renderEmpBody(){
     const cats=[...new Set(CASH_DATA.carte.map(i=>i.cat))];
     body.innerHTML=cats.map(cat=>`
       <div style="padding:10px 16px 4px;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold)">${esc(cat)}</div>
-      ${CASH_DATA.carte.filter(i=>i.cat===cat).map(it=>`
-        <div class="add-item" onclick="addItemCtx(${JSON.stringify(it.name)},${it.price},${it.tva},null)">
+      ${CASH_DATA.carte.filter(i=>i.cat===cat).map(it=>{
+        const ci=CASH_DATA.carte.indexOf(it);
+        return`<div class="add-item" onclick="tapDivers(${ci})">
           <div class="ai-name">${esc(it.name)}</div>
           <div style="text-align:right"><div class="ai-price">${fmt(it.price)}</div><div class="ai-tva">TVA ${it.tva}%</div></div>
-        </div>`).join('')}`).join('');
+        </div>`;
+      }).join('')}`).join('');
   } else {
     // Panier
     if(!EMP_CART.length){body.innerHTML='<div class="order-empty">Panier vide</div>';return;}
