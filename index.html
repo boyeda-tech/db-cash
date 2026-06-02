@@ -359,7 +359,8 @@
   <div class="ticket-view">
     <div class="ticket-paper" id="ticket-paper"></div>
     <div class="ticket-btns">
-      <button class="btn-print" onclick="window.print()">🖨 Imprimer</button>
+      <button class="btn-print" onclick="window.print()">🖨 Client</button>
+      <button class="btn-print" style="background:var(--txt2)" onclick="printExemplaire()">📋 Mon exemplaire</button>
       <button class="btn-new" onclick="backToAccueil()">Nouvelle table</button>
     </div>
   </div>
@@ -1027,6 +1028,19 @@ function loadSessionTickets(){
 // ═══════════════════════════════════════════════════
 // TICKET
 // ═══════════════════════════════════════════════════
+function printExemplaire(){
+  // Imprime toujours la version détaillée complète (pour la compta)
+  // même si le client a eu la version sans détails
+  const prev=TICKET_DETAIL;
+  TICKET_DETAIL=true;
+  renderTicket(LAST_TICKET);
+  window.print();
+  // Remet l'affichage dans l'état précédent après impression
+  TICKET_DETAIL=prev;
+  renderTicket(LAST_TICKET);
+  setTicketDetail(prev);
+}
+
 function setTicketDetail(withDetail){
   TICKET_DETAIL=withDetail;
   document.getElementById('btn-detail-on').style.background=withDetail?'var(--gold)':'none';
