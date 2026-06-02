@@ -1263,18 +1263,39 @@ function renderAdmSettings(body){
         <button class="adm-btn" onclick="changePw()">Modifier</button>
       </div>
     </div>
-    <div class="adm-sec"><div class="adm-sec-title">Session</div>
+    <div class="adm-sec"><div class="adm-sec-title">Session en cours</div>
       <div class="z-row"><span class="z-lbl">Tickets aujourd'hui</span><span class="z-val">${SESSION_TICKETS.length}</span></div>
       <div class="z-row"><span class="z-lbl">Dernier ticket N°</span><span class="z-val">${TICKET_SEQ}</span></div>
       <div class="z-row"><span class="z-lbl">Tables ouvertes</span><span class="z-val">${Object.keys(OPEN_TABLES).length}</span></div>
-      <button class="adm-btn danger" style="margin-top:10px" onclick="if(confirm('Clôturer la session ?')){SESSION_TICKETS=[];saveSessionTickets();toast('Session clôturée');}">Clôturer la session</button>
+      <button class="adm-btn danger" style="margin-top:10px" onclick="if(confirm('Clôturer la session ?')){SESSION_TICKETS=[];saveSessionTickets();renderAdm();toast('Session clôturée');}">Clôturer la session</button>
+    </div>
+    <div class="adm-sec" style="border-color:var(--red)">
+      <div class="adm-sec-title" style="color:var(--red)">Effacer les tests — repartir à zéro</div>
+      <div style="font-size:13px;color:var(--txt2);margin-bottom:12px;line-height:1.5">
+        À faire <strong>avant le premier vrai service</strong> pour que la comptabilité commence proprement.<br>
+        Efface tous les tickets de test, remet le numéro de ticket à 0 et repart la chaîne ISCA.
+      </div>
+      <div class="z-row" style="margin-bottom:8px"><span class="z-lbl">Tickets à supprimer</span><span class="z-val" style="color:var(--red)">${SESSION_TICKETS.length}</span></div>
+      <div class="z-row" style="margin-bottom:12px"><span class="z-lbl">Compteur ticket actuel</span><span class="z-val" style="color:var(--red)">N°${TICKET_SEQ}</span></div>
+      <button class="adm-btn danger" style="width:100%;padding:12px;font-size:14px" onclick="resetPourVraiService()">🗑 Effacer les tests et repartir à N°1</button>
     </div>
     <div class="adm-sec"><div class="adm-sec-title">DB-Carte (sync)</div>
-      <div style="font-size:13px;color:var(--txt2);margin-bottom:8px">Les plats dans les menus sont chargés en temps réel depuis DB-Carte à chaque ouverture du picker.</div>
+      <div style="font-size:13px;color:var(--txt2);margin-bottom:8px">Les menus sont chargés en temps réel depuis DB-Carte.</div>
       <button class="adm-btn" onclick="CARTE_CACHE=null;toast('Cache vidé — rechargement à la prochaine ouverture')">Vider le cache DB-Carte</button>
     </div>`;
 }
 function changePw(){const p1=document.getElementById('p1').value,p2=document.getElementById('p2').value;if(!p1||p1!==p2){toast('Mots de passe différents');return;}PASS=p1;localStorage.setItem('db_cash_pass',p1);sbSaveSetting('db_cash_pass',p1);toast('✓ Mot de passe modifié');}
+function resetPourVraiService(){
+  if(!confirm('Effacer tous les tickets de test et remettre le compteur à zéro ?\n\nCette action est irréversible — à faire uniquement avant le premier vrai service.'))return;
+  SESSION_TICKETS=[];
+  TICKET_SEQ=0;
+  LAST_HASH='0'.repeat(64);
+  localStorage.setItem('db_cash_seq','0');
+  localStorage.setItem('db_cash_last_hash','0'.repeat(64));
+  saveSessionTickets();
+  renderAdm();
+  toast('✓ Compteurs remis à zéro — prêt pour le premier vrai service');
+}
 
 // ═══════════════════════════════════════════════════
 // PERSISTANCE
