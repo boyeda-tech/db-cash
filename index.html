@@ -352,6 +352,10 @@
     <button class="btn-back" onclick="backToAccueil()">← Accueil</button>
     <div class="hdr-title">Ticket <span>n°<span id="ticket-num"></span></span></div>
   </div>
+  <div style="display:flex;gap:8px;padding:10px 16px 0;flex-shrink:0">
+    <button id="btn-detail-on"  onclick="setTicketDetail(true)"  style="flex:1;padding:9px;border-radius:8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;font-family:var(--serif);background:var(--gold);border:1.5px solid var(--gold);color:#fff">Avec détails</button>
+    <button id="btn-detail-off" onclick="setTicketDetail(false)" style="flex:1;padding:9px;border-radius:8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;font-family:var(--serif);background:none;border:1.5px solid var(--border-s);color:var(--txt2)">Sans détails</button>
+  </div>
   <div class="ticket-view">
     <div class="ticket-paper" id="ticket-paper"></div>
     <div class="ticket-btns">
@@ -446,6 +450,8 @@ let LAST_HASH = localStorage.getItem('db_cash_last_hash')||'0'.repeat(64);
 let SESSION_TICKETS = [];
 let TEST_MODE = false;   // mode test : tickets marqués TEST, hors comptabilité
 let TEST_SEQ  = 0;       // compteur tickets de test (T-1, T-2…)
+let TICKET_DETAIL = true; // true = avec détails | false = sans détails (total uniquement)
+let LAST_TICKET = null;   // dernier ticket généré, pour re-rendu sans/avec détails
 // Point de reprise journalier : état avant les tests du matin
 // Sauvegardé automatiquement au 1er démarrage de chaque journée
 let DAY_START_SEQ  = parseInt(localStorage.getItem('db_cash_day_seq') ||TICKET_SEQ);
@@ -999,7 +1005,7 @@ async function valider(ttc){
   SESSION_TICKETS.push(td);saveSessionTickets();
   await sbSave('db-cash',{tickets:SESSION_TICKETS,date:new Date().toDateString()});
   if(!CURRENT_ORDER.isEmporter)delete OPEN_TABLES[CURRENT_ORDER.tableNum];else EMP_CART=[];
-  saveOpenTables();renderTicket(td);showView('v-ticket');
+  saveOpenTables();TICKET_DETAIL=true;setTicketDetail(true);renderTicket(td);showView('v-ticket');
 }
 
 function saveSessionTickets(){localStorage.setItem('db_cash_session',JSON.stringify({tickets:SESSION_TICKETS,date:new Date().toDateString()}));}
@@ -1021,7 +1027,19 @@ function loadSessionTickets(){
 // ═══════════════════════════════════════════════════
 // TICKET
 // ═══════════════════════════════════════════════════
+function setTicketDetail(withDetail){
+  TICKET_DETAIL=withDetail;
+  document.getElementById('btn-detail-on').style.background=withDetail?'var(--gold)':'none';
+  document.getElementById('btn-detail-on').style.color=withDetail?'#fff':'var(--txt2)';
+  document.getElementById('btn-detail-on').style.borderColor=withDetail?'var(--gold)':'var(--border-s)';
+  document.getElementById('btn-detail-off').style.background=withDetail?'none':'var(--gold)';
+  document.getElementById('btn-detail-off').style.color=withDetail?'var(--txt2)':'#fff';
+  document.getElementById('btn-detail-off').style.borderColor=withDetail?'var(--border-s)':'var(--gold)';
+  if(LAST_TICKET)renderTicket(LAST_TICKET);
+}
+
 function renderTicket(t){
+  LAST_TICKET=t;
   document.getElementById('ticket-num').textContent=t.seq;
   const typeLabel=t.type==='emporter'?'Vente à emporter':`Table ${t.tableNum} — ${t.covers} couvert${t.covers>1?'s':''}`;
   const d=new Date(t.date);
@@ -1038,10 +1056,7 @@ function renderTicket(t){
     ?`<span style="color:#B71C1C;font-weight:bold">TEST N° ${t.seq}</span>`
     :`Ticket N° ${String(t.seq).padStart(6,'0')}`;
 
-  const html=`
-    ${testBanner}
-    <div class="tk-logo"><div class="tk-name">L'Atelier Privé</div><div class="tk-sub">David Boyer · Restaurant gastronomique</div></div>
-    <div class="tk-info">${typeLabel}<br>${ds}<br>${seqLabel}</div>
+  const itemsBlock=TICKET_DETAIL?`
     <div class="tk-items">
       ${t.items.map(it=>`
         <div class="tk-item"><span class="tk-item-name">${esc(it.name)}</span><span class="tk-item-qty">×${it.qty}</span><span class="tk-item-price">${fmt(it.price*it.qty)}</span></div>
@@ -1053,7 +1068,23 @@ function renderTicket(t){
       <div class="tk-tot-row"><span>TVA</span><span>${fmt(t.tva)}</span></div>
       <div class="tk-tot-row big"><span>TOTAL TTC</span><span>${fmt(t.ttc)}</span></div>
     </div>
-    <div class="tk-tva">${Object.entries(t.tvaMap).map(([r,v])=>`<div class="tk-tva-row"><span>TVA ${r}%</span><span>Base ${fmt(v.base)} / TVA ${fmt(v.tva)}</span></div>`).join('')}</div>
+    <div class="tk-tva">${Object.entries(t.tvaMap).map(([r,v])=>`<div class="tk-tva-row"><span>TVA ${r}%</span><span>Base ${fmt(v.base)} / TVA ${fmt(v.tva)}</span></div>`).join('')}</div>`
+  :`<div class="tk-items" style="border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:12px 0;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:bold">
+        <span>Restaurant — ${t.covers} couvert${(t.covers||1)>1?'s':''}</span>
+        <span>${fmt(t.ttc)}</span>
+      </div>
+    </div>
+    <div class="tk-totals">
+      <div class="tk-tot-row big"><span>TOTAL TTC</span><span>${fmt(t.ttc)}</span></div>
+    </div>
+    <div class="tk-tva">${Object.entries(t.tvaMap).map(([r,v])=>`<div class="tk-tva-row"><span>TVA ${r}%</span><span>Base ${fmt(v.base)} / TVA ${fmt(v.tva)}</span></div>`).join('')}</div>`;
+
+  const html=`
+    ${testBanner}
+    <div class="tk-logo"><div class="tk-name">L'Atelier Privé</div><div class="tk-sub">David Boyer · Restaurant gastronomique</div></div>
+    <div class="tk-info">${typeLabel}<br>${ds}<br>${seqLabel}</div>
+    ${itemsBlock}
     <div class="tk-pay">Mode de règlement : ${ml[t.payment.method]||t.payment.method}</div>
     ${t.isTest
       ?`<div style="border:2px dashed #B71C1C;padding:6px;text-align:center;font-size:9px;color:#B71C1C;letter-spacing:.15em;margin-top:8px">DOCUMENT DE TEST — NON COMPTABILISÉ</div>`
