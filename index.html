@@ -253,6 +253,7 @@
     /* PRINT */
     @media print{body>*{display:none!important}#print-ticket{display:block!important;padding:0;margin:0}#print-ticket *{color:#000!important;background:#fff!important}}
     #print-ticket{display:none}
+    @media print{#fiche-modal,#test-banner{display:none!important}}
 
     /* SPINNER */
     .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle}
@@ -1106,10 +1107,15 @@ function confirmerFicheSansDetail(){
     <div class="tk-tva" style="margin-bottom:8px">${tvaLines}</div>
     <div class="tk-pay">Mode de règlement : ${ml[t.payment?.method]||'—'}</div>
     <div class="tk-footer">Merci de votre visite — L'Atelier Privé de David Boyer<br>Document justificatif de frais de repas</div>`;
-  document.getElementById('print-ticket').innerHTML=html;
+  // Injecter dans print-ticket, imprimer, puis restaurer APRÈS impression
+  const pt=document.getElementById('print-ticket');
+  pt.innerHTML=html;
+  const restore=()=>{
+    renderTicket(LAST_TICKET); // remet l'addition détaillée
+    window.removeEventListener('afterprint',restore);
+  };
+  window.addEventListener('afterprint',restore);
   window.print();
-  // Remettre l'addition détaillée dans print-ticket
-  renderTicket(LAST_TICKET);
 }
 
 function renderTicket(t){
