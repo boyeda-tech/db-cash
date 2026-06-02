@@ -481,7 +481,11 @@ let LAST_TICKET_HTML = '';  // HTML ticket pour impression nouvel onglet
 // Styles autonomes pour la page d'impression (indépendant du CSS de l'app)
 const PRINT_STYLES=`@page{margin:12mm;size:A4}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Georgia,serif;background:#fff;color:#1a1a1a;max-width:340px;margin:0 auto;padding:0}
+body{font-family:Georgia,serif;background:#fff;color:#000;max-width:340px;margin:0 auto;padding:0}
+/* Forcer tout en noir/blanc */
+*{color:#000!important;background:#fff!important;border-color:#000!important}
+/* Bandeau TEST : fond noir, texte blanc */
+.tk-test-banner{background:#000!important;color:#fff!important;border:none}
 .tk-logo{text-align:center;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:12px}
 .tk-name{font-size:22px;font-weight:300;letter-spacing:.1em}
 .tk-sub{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#888;margin-top:2px}
@@ -1204,13 +1208,13 @@ function buildTicketHtml(t){
   const ml={cb:'Carte bancaire',especes:'Espèces',cheque:'Chèque'};
 
   const testBanner=t.isTest?`
-    <div style="background:#B71C1C;color:#fff;text-align:center;padding:10px 8px;margin:-20px -20px 14px;border-radius:8px 8px 0 0">
+    <div class="tk-test-banner" style="text-align:center;padding:10px 8px;margin-bottom:14px;border:2px solid #000">
       <div style="font-size:22px;font-weight:bold;letter-spacing:.3em">⚠ TEST ⚠</div>
       <div style="font-size:9px;letter-spacing:.2em;margin-top:2px">DOCUMENT NON VALABLE — USAGE INTERNE</div>
     </div>`:'';
 
   const seqLabel=t.isTest
-    ?`<span style="color:#B71C1C;font-weight:bold">TEST N° ${t.seq}</span>`
+    ?`<span style="font-weight:bold">TEST N° ${t.seq}</span>`
     :`Ticket N° ${String(t.seq).padStart(6,'0')}`;
 
   const itemsBlock=TICKET_DETAIL?`
@@ -1244,7 +1248,7 @@ function buildTicketHtml(t){
     ${itemsBlock}
     <div class="tk-pay">Mode de règlement : ${ml[t.payment.method]||t.payment.method}</div>
     ${t.isTest
-      ?`<div style="border:2px dashed #B71C1C;padding:6px;text-align:center;font-size:9px;color:#B71C1C;letter-spacing:.15em;margin-top:8px">DOCUMENT DE TEST — NON COMPTABILISÉ</div>`
+      ?`<div style="border:2px dashed #000;padding:6px;text-align:center;font-size:9px;letter-spacing:.15em;margin-top:8px">DOCUMENT DE TEST — NON COMPTABILISÉ</div>`
       :`<div class="tk-footer">Merci de votre visite — L'Atelier Privé de David Boyer<br>Document fiscal conforme aux exigences légales<br>N° TVA intracommunautaire : à compléter</div>
     <div class="tk-hash">ISCA · N°${t.seq} · ${t.hash?.slice(0,32)}…</div>`}`;
   return html;
