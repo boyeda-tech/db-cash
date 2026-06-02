@@ -356,7 +356,7 @@
   <div class="ticket-view">
     <div class="ticket-paper" id="ticket-paper"></div>
     <div class="ticket-btns">
-      <button class="btn-print" onclick="window.print()">🖨 Imprimer l'addition</button>
+      <button class="btn-print" onclick="doPrint(LAST_TICKET_HTML)">🖨 Imprimer l'addition</button>
       <button class="btn-new" onclick="backToAccueil()">Nouvelle table</button>
     </div>
     <div style="display:flex;gap:8px;margin-top:10px;width:100%;max-width:360px">
@@ -474,8 +474,47 @@ let LAST_HASH = localStorage.getItem('db_cash_last_hash')||'0'.repeat(64);
 let SESSION_TICKETS = [];
 let TEST_MODE = false;   // mode test : tickets marqués TEST, hors comptabilité
 let TEST_SEQ  = 0;       // compteur tickets de test (T-1, T-2…)
-let TICKET_DETAIL = true; // true = avec détails | false = sans détails (total uniquement)
-let LAST_TICKET = null;   // dernier ticket généré, pour re-rendu sans/avec détails
+let TICKET_DETAIL = true;
+let LAST_TICKET = null;
+let LAST_TICKET_HTML = '';  // HTML ticket pour impression nouvel onglet
+
+// Styles autonomes pour la page d'impression (indépendant du CSS de l'app)
+const PRINT_STYLES=`*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,serif;background:#fff;color:#1a1a1a;max-width:380px;margin:0 auto;padding:20px}
+.tk-logo{text-align:center;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:12px}
+.tk-name{font-size:22px;font-weight:300;letter-spacing:.1em}
+.tk-sub{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#888;margin-top:2px}
+.tk-info{font-size:10px;color:#666;margin-bottom:10px;text-align:center;line-height:1.6}
+.tk-items{border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin-bottom:8px}
+.tk-item{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px}
+.tk-item-name{flex:1;padding-right:8px}
+.tk-item-qty{min-width:24px;text-align:center;color:#888}
+.tk-item-price{min-width:55px;text-align:right}
+.tk-item-meta{font-size:9px;color:#999;padding-left:8px;font-style:italic;margin-bottom:3px}
+.tk-totals{font-size:11px;margin-bottom:8px}
+.tk-tot-row{display:flex;justify-content:space-between;margin-bottom:2px}
+.tk-tot-row.big{font-size:15px;font-weight:bold;border-top:1px solid #ccc;padding-top:5px;margin-top:5px}
+.tk-tva{font-size:9px;color:#888;margin-bottom:8px}
+.tk-tva-row{display:flex;justify-content:space-between;margin-bottom:1px}
+.tk-pay{font-size:11px;margin-bottom:8px;border-top:1px dashed #ccc;padding-top:8px}
+.tk-footer{font-size:9px;color:#999;text-align:center;border-top:1px solid #ddd;padding-top:8px;line-height:1.6}
+.tk-hash{font-size:7px;color:#ccc;text-align:center;margin-top:6px;word-break:break-all}`;
+
+// Ouvre l'impression dans un nouvel onglet — DB Cash ne bouge pas
+function doPrint(contentHtml){
+  const page=`<!DOCTYPE html><html lang="fr"><head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Ticket — L'Atelier Privé</title>
+    <style>${PRINT_STYLES}</style>
+  </head><body>${contentHtml}
+  <script>window.onload=function(){setTimeout(function(){window.print();},350)};<\/script>
+  </body></html>`;
+  const blob=new Blob([page],{type:'text/html'});
+  const url=URL.createObjectURL(blob);
+  const w=window.open(url,'_blank');
+  if(!w)toast('Autorisez les popups pour imprimer');
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 // Point de reprise journalier : état avant les tests du matin
 // Sauvegardé automatiquement au 1er démarrage de chaque journée
 let DAY_START_SEQ  = parseInt(localStorage.getItem('db_cash_day_seq') ||TICKET_SEQ);
@@ -1141,20 +1180,18 @@ function confirmerFicheSansDetail(){
     <div class="tk-tva" style="margin-bottom:8px">${tvaLines}</div>
     <div class="tk-pay">Mode de règlement : ${ml[t.payment?.method]||'—'}</div>
     <div class="tk-footer">Merci de votre visite — L'Atelier Privé de David Boyer<br>Document justificatif de frais de repas</div>`;
-  // Injecter dans print-ticket, imprimer, puis restaurer APRÈS impression
-  const pt=document.getElementById('print-ticket');
-  pt.innerHTML=html;
-  const restore=()=>{
-    renderTicket(LAST_TICKET); // remet l'addition détaillée
-    window.removeEventListener('afterprint',restore);
-  };
-  window.addEventListener('afterprint',restore);
-  window.print();
+  doPrint(html);
 }
 
 function renderTicket(t){
   LAST_TICKET=t;
+  const html=buildTicketHtml(t);
+  LAST_TICKET_HTML=html;
   document.getElementById('ticket-num').textContent=t.seq;
+  document.getElementById('ticket-paper').innerHTML=html;
+  document.getElementById('print-ticket').innerHTML=html; // fallback
+}
+function buildTicketHtml(t){
   const typeLabel=t.type==='emporter'?'Vente à emporter':`Table ${t.tableNum} — ${t.covers} couvert${t.covers>1?'s':''}`;
   const d=new Date(t.date);
   const ds=d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
@@ -1204,8 +1241,7 @@ function renderTicket(t){
       ?`<div style="border:2px dashed #B71C1C;padding:6px;text-align:center;font-size:9px;color:#B71C1C;letter-spacing:.15em;margin-top:8px">DOCUMENT DE TEST — NON COMPTABILISÉ</div>`
       :`<div class="tk-footer">Merci de votre visite — L'Atelier Privé de David Boyer<br>Document fiscal conforme aux exigences légales<br>N° TVA intracommunautaire : à compléter</div>
     <div class="tk-hash">ISCA · N°${t.seq} · ${t.hash?.slice(0,32)}…</div>`}`;
-  document.getElementById('ticket-paper').innerHTML=html;
-  document.getElementById('print-ticket').innerHTML=html;
+  return html;
 }
 
 // ═══════════════════════════════════════════════════
@@ -1281,6 +1317,11 @@ function updateEmpTotal(){
 // Z DE CAISSE
 // ═══════════════════════════════════════════════════
 function showZ(){renderZ();showView('v-z');}
+function printZ(){
+  const body=document.getElementById('z-body');
+  if(!body)return;
+  doPrint(body.innerHTML);
+}
 function renderZ(){
   const body=document.getElementById('z-body');
   if(!SESSION_TICKETS.length){body.innerHTML='<div class="z-empty">Aucune vente aujourd\'hui</div>';return;}
@@ -1313,7 +1354,7 @@ function renderZ(){
       <div>Dernier hash : ${LAST_HASH.slice(0,40)}…</div>
       <div style="margin-top:4px">N° ${SESSION_TICKETS[0]?.seq||'—'} → N° ${SESSION_TICKETS[SESSION_TICKETS.length-1]?.seq||'—'}</div>
     </div>
-    <button style="width:100%;background:var(--gold);border:none;color:#fff;padding:13px;border-radius:8px;font-size:14px;font-family:var(--serif);cursor:pointer" onclick="window.print()">🖨 Imprimer le Z</button>`;
+    <button style="width:100%;background:var(--gold);border:none;color:#fff;padding:13px;border-radius:8px;font-size:14px;font-family:var(--serif);cursor:pointer" onclick="printZ()">🖨 Imprimer le Z</button>`;
 }
 
 // ═══════════════════════════════════════════════════
