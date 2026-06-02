@@ -451,30 +451,9 @@ let WINE_CACHE = null;
 let MENU_SEL = {};
 
 let CASH_DATA = {
-  menus: [
-    {
-      id:'m1', name:'Menu du marché', price:45,
-      sections:[
-        {id:'s1a',name:'Entrée',    type:'choice', required:true,  supPrice:0, source:'carte', manualChoices:[]},
-        {id:'s1b',name:'Plat',      type:'choice', required:true,  supPrice:0, source:'carte', manualChoices:[]},
-        {id:'s1c',name:'Fromage',   type:'option', required:false, supPrice:8, source:'manual',manualChoices:[]},
-        {id:'s1d',name:'Dessert',   type:'choice', required:true,  supPrice:0, source:'carte', manualChoices:[]},
-        {id:'s1e',name:'Café & Mignardises',type:'fixed',required:false,supPrice:0,source:'manual',manualChoices:[]},
-      ]
-    },
-    {
-      id:'m2', name:'Menu Signature', price:65,
-      sections:[
-        {id:'s2a',name:'Amuse-bouche',type:'fixed', required:false, supPrice:0, source:'manual',manualChoices:[]},
-        {id:'s2b',name:'Entrée',      type:'choice',required:true,  supPrice:0, source:'carte', manualChoices:[]},
-        {id:'s2c',name:'Plat',        type:'choice',required:true,  supPrice:0, source:'carte', manualChoices:[]},
-        {id:'s2d',name:'Fromage',     type:'option',required:false, supPrice:10,source:'manual',manualChoices:[]},
-        {id:'s2e',name:'Dessert',     type:'choice',required:true,  supPrice:0, source:'carte', manualChoices:[]},
-        {id:'s2f',name:'Café & Mignardises',type:'fixed',required:false,supPrice:0,source:'manual',manualChoices:[]},
-      ]
-    }
-  ],
-  carte:[]
+  menuSource: 'carte',  // 'carte' = depuis DB-Carte (auto) | 'manual' = menus de secours admin
+  menus: [],            // menus de secours — utilisés seulement si menuSource==='manual'
+  carte: []
 };
 
 // ═══════════════════════════════════════════════════
@@ -604,26 +583,68 @@ function addItemToOrder(name,price,tvaRate,meta){
 // ═══════════════════════════════════════════════════
 // ADD SHEET
 // ═══════════════════════════════════════════════════
-function openSheet(mode){
+async function openSheet(mode){
   SHEET_MODE=mode;
   document.getElementById('add-sheet').style.display='flex';
   document.querySelectorAll('.sheet-tab').forEach((b,i)=>b.classList.toggle('on',['menus','vins','divers'][i]===mode));
-  // Initialiser MENU_SEL pour les menus si pas fait
-  CASH_DATA.menus.forEach(m=>{if(!MENU_SEL[m.id])initMenuSel(m.id);});
+  if(mode==='menus'){
+    await loadCarteIfNeeded();
+    getMenusSync().forEach(m=>{if(!MENU_SEL[m.id])initMenuSel(m.id);});
+  }
   renderSheetBody();
+}
+// Raccourci pour ouvrir le sheet menus sur un menu précis (depuis vue emporter)
+function openSheetMenu(mi){
+  SELECTED_MENU_ID=getMenusSync()[mi]?.id||null;
+  openSheet('menus');
 }
 function closeSheet(){document.getElementById('add-sheet').style.display='none';}
 function swSheetTab(mode,btn){SHEET_MODE=mode;document.querySelectorAll('.sheet-tab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');renderSheetBody();}
-function initMenuSel(menuId){MENU_SEL[menuId]={};const m=CASH_DATA.menus.find(x=>x.id===menuId);if(m)m.sections.forEach(s=>{MENU_SEL[menuId][s.id]=null;});}
+function initMenuSel(menuId){MENU_SEL[menuId]={};const m=getMenusSync().find(x=>x.id===menuId);if(m)m.sections.forEach(s=>{MENU_SEL[menuId][s.id]=null;});}
 function isEmp(){return CURRENT_ORDER?.isEmporter}
 
 // Tables globales pour éviter JSON.stringify dans les onclick (bug guillemets)
 let WINES_ARR = [];
 
+// ── Source des menus : DB-Carte (auto) ou Manuel (secours) ──
+// DB-Carte structure : { menus:[{id,name,priceTTC,tva,seqIds:[]}], sequences:[{id,name,fromage,priceExtra,dishes:[]}] }
+// Les séquences avec fromage:true → sections type 'option' (oui/non + supplément)
+// Les autres séquences → sections type 'fixed' (incluses, pas de choix dans le picker)
+function carteMenusToCash(carteData){
+  if(!carteData?.menus||!carteData?.sequences)return[];
+  return carteData.menus.map(m=>{
+    const seqs=(m.seqIds||[]).map(id=>carteData.sequences.find(s=>s.id===id)).filter(Boolean);
+    const sections=seqs.map(seq=>({
+      id:seq.id, name:seq.name,
+      type:seq.fromage?'option':'fixed',
+      required:false,
+      supPrice:seq.fromage?(seq.priceExtra||0):0,
+      source:'carte', manualChoices:[]
+    }));
+    return{id:m.id, name:m.name, price:m.priceTTC||0, tva:m.tva||10, sections};
+  });
+}
+// Retourne les menus actifs (sync) — depuis CARTE_CACHE ou menus manuels
+function getMenusSync(){
+  if(CASH_DATA.menuSource==='manual')return CASH_DATA.menus;
+  if(CARTE_CACHE)return carteMenusToCash(CARTE_CACHE);
+  return CASH_DATA.menus; // fallback si cache pas encore chargé
+}
+// Charge CARTE_CACHE depuis Supabase si nécessaire (async)
+async function loadCarteIfNeeded(){
+  if(CASH_DATA.menuSource==='manual')return;
+  if(!CARTE_CACHE)CARTE_CACHE=await sbLoad('db-carte');
+}
+
 async function renderSheetBody(){
   const body=document.getElementById('sheet-body');
   if(SHEET_MODE==='menus'){
-    if(!CASH_DATA.menus.length){body.innerHTML='<div class="order-empty">Aucun menu — voir Admin</div>';return;}
+    if(CASH_DATA.menuSource!=='manual'&&!CARTE_CACHE){
+      body.innerHTML='<div style="padding:24px;text-align:center;color:var(--txt3)">Chargement des menus…</div>';
+      await loadCarteIfNeeded();
+    }
+    const menus=getMenusSync();
+    if(!menus.length){body.innerHTML='<div class="order-empty">Aucun menu — vérifiez DB-Carte ou passez en mode manuel dans Admin</div>';return;}
     const tva=isEmp()?5.5:10;
     renderMenuList(body,tva);
   }
@@ -725,14 +746,15 @@ function tapWine(i){
 let SELECTED_MENU_ID = null;
 
 function renderMenuList(body,tva){
+  const menus=getMenusSync();
   // Si un menu est sélectionné, afficher son panneau options
   if(SELECTED_MENU_ID){
-    const m=CASH_DATA.menus.find(x=>x.id===SELECTED_MENU_ID);
-    if(m){const mi=CASH_DATA.menus.indexOf(m);renderMenuOptions(body,m,mi,tva);return;}
+    const mi=menus.findIndex(x=>x.id===SELECTED_MENU_ID);
+    if(mi>=0){renderMenuOptions(body,menus[mi],mi,tva);return;}
     SELECTED_MENU_ID=null;
   }
   // Sinon liste simple
-  body.innerHTML=CASH_DATA.menus.map((m,mi)=>{
+  body.innerHTML=menus.map((m,mi)=>{
     const opts=(m.sections||[]).filter(s=>s.type==='option');
     return`<div class="add-item" onclick="selectMenu(${mi},${tva})">
       <div>
@@ -748,7 +770,7 @@ function renderMenuList(body,tva){
 }
 
 function selectMenu(mi,tva){
-  const m=CASH_DATA.menus[mi];if(!m)return;
+  const m=getMenusSync()[mi];if(!m)return;
   SELECTED_MENU_ID=m.id;
   if(!MENU_SEL[m.id])initMenuSel(m.id);
   const body=document.getElementById('sheet-body');
@@ -813,7 +835,7 @@ function renderMenuOptions(body,m,mi,tva){
 
 function setOpt(mi,si,valNum,tva){
   // valNum: 1='oui', 0='non'
-  const m=CASH_DATA.menus[mi];if(!m)return;
+  const m=getMenusSync()[mi];if(!m)return;
   const s=m.sections[si];if(!s)return;
   if(!MENU_SEL[m.id])MENU_SEL[m.id]={};
   MENU_SEL[m.id][s.id]=valNum?'oui':'non';
@@ -822,7 +844,7 @@ function setOpt(mi,si,valNum,tva){
 }
 
 function addMenuFromSheet(mi,tva){
-  const m=CASH_DATA.menus[mi];if(!m)return;
+  const m=getMenusSync()[mi];if(!m)return;
   const menuId=m.id;
   if(!m.sections)m.sections=[];
   const sel=MENU_SEL[menuId]||{};
@@ -978,10 +1000,20 @@ function swEmpTab(i,btn){EMP_TAB=i;document.querySelectorAll('.emp-tab').forEach
 async function renderEmpBody(){
   const body=document.getElementById('emp-body');
   if(EMP_TAB===0){
-    if(!CASH_DATA.menus.length){body.innerHTML='<div class="order-empty">Aucun menu — voir Admin</div>';return;}
-    if(!CARTE_CACHE){body.innerHTML='<div style="padding:30px;text-align:center"><span class="spin"></span> Chargement…</div>';CARTE_CACHE=await sbLoad('db-carte');}
+    if(CASH_DATA.menuSource!=='manual'&&!CARTE_CACHE){body.innerHTML='<div style="padding:30px;text-align:center"><span class="spin"></span> Chargement…</div>';await loadCarteIfNeeded();}
+    const menus=getMenusSync();
+    if(!menus.length){body.innerHTML='<div class="order-empty">Aucun menu — vérifiez DB-Carte</div>';return;}
     const tva=5.5;
-    body.innerHTML=CASH_DATA.menus.map(m=>`<div class="menu-card" id="emc-${m.id}">${menuCardInner(m,tva)}</div>`).join('');
+    body.innerHTML=menus.map((m,mi)=>{
+      const opts=(m.sections||[]).filter(s=>s.type==='option');
+      return`<div class="add-item" onclick="openSheetMenu(${mi})">
+        <div>
+          <div class="ai-name">${esc(m.name)}</div>
+          ${opts.length?`<div class="ai-meta">${opts.map(s=>esc(s.name)+(s.supPrice>0?' +'+fmt(s.supPrice):'')).join(' · ')}</div>`:''}
+        </div>
+        <div style="text-align:right"><div class="ai-price">${fmt(m.price)}</div><div class="ai-tva">TVA ${tva}%</div></div>
+      </div>`;
+    }).join('');
   } else if(EMP_TAB===1){
     if(!CASH_DATA.carte.length){body.innerHTML='<div class="order-empty">Aucun article — voir Admin</div>';return;}
     const cats=[...new Set(CASH_DATA.carte.map(i=>i.cat))];
@@ -1075,7 +1107,57 @@ function renderAdm(){const b=document.getElementById('adm-body');[renderAdmMenus
 
 // ── Admin Menus ──
 function renderAdmMenus(body){
-  body.innerHTML=CASH_DATA.menus.map((m,mi)=>`
+  const isManual=CASH_DATA.menuSource==='manual';
+
+  if(!isManual){
+    // ── Mode DB-Carte : lecture seule ──
+    const menus=getMenusSync();
+    const rows=menus.length?menus.map(m=>{
+      const opts=(m.sections||[]).filter(s=>s.type==='option');
+      const fixed=(m.sections||[]).filter(s=>s.type==='fixed');
+      return`<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-size:15px;color:var(--gold);font-weight:600">${esc(m.name)}</span>
+          <span style="font-size:14px;color:var(--txt2)">${fmt(m.price)} · TVA ${m.tva}%</span>
+        </div>
+        ${fixed.length?`<div style="font-size:11px;color:var(--txt3);margin-top:3px">Inclus : ${fixed.map(s=>esc(s.name)).join(' · ')}</div>`:''}
+        ${opts.length?`<div style="font-size:11px;color:var(--blue);margin-top:2px">Options : ${opts.map(s=>esc(s.name)+(s.supPrice>0?' +'+fmt(s.supPrice):'')).join(' · ')}</div>`:''}
+      </div>`;
+    }).join(''):`<div style="color:var(--txt3);font-style:italic;font-size:13px;padding:12px 0">Aucun menu chargé — vérifiez DB-Carte</div>`;
+
+    body.innerHTML=`
+      <div class="adm-sec" style="border-color:var(--green)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="adm-sec-title" style="margin-bottom:0">Source : DB-Carte</div>
+          <span style="background:var(--green);color:#fff;padding:2px 10px;border-radius:10px;font-size:9px;letter-spacing:.1em">ACTIF</span>
+        </div>
+        <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">Les menus sont synchronisés automatiquement depuis DB-Carte. Modifier un menu dans DB-Carte → visible immédiatement ici.</div>
+        ${rows}
+        <div class="adm-row" style="margin-top:14px">
+          <button class="adm-btn" onclick="CARTE_CACHE=null;loadCarteIfNeeded().then(()=>renderAdm());toast('✓ Rechargé depuis DB-Carte')">🔄 Recharger DB-Carte</button>
+        </div>
+      </div>
+      <div class="adm-sec" style="border-color:rgba(183,28,28,.3)">
+        <div class="adm-sec-title" style="color:var(--red)">Mode secours</div>
+        <div style="font-size:12px;color:var(--txt2);margin-bottom:10px">En cas de bug DB-Carte, activez le mode secours pour définir des menus manuellement dans DB-Cash.</div>
+        <button class="adm-btn danger" onclick="if(confirm('Passer en mode secours ? DB-Carte ne sera plus utilisé comme source des menus.')){CASH_DATA.menuSource='manual';saveCash();renderAdm();}">⚠ Activer le mode secours manuel</button>
+      </div>`;
+    return;
+  }
+
+  // ── Mode Manuel (secours) : éditeur complet ──
+  body.innerHTML=`
+    <div class="adm-sec" style="background:#FFF9EE;border-color:var(--gold)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:22px">⚠</span>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--gold)">Mode secours actif — menus manuels</div>
+          <div style="font-size:11px;color:var(--txt2)">DB-Carte n'est pas utilisé comme source.</div>
+        </div>
+        <button class="adm-btn" style="margin-left:auto" onclick="if(confirm('Revenir aux menus DB-Carte ?')){CASH_DATA.menuSource='carte';saveCash();renderAdm();}">↩ Revenir à DB-Carte</button>
+      </div>
+    </div>`+
+  CASH_DATA.menus.map((m,mi)=>`
     <div class="adm-sec">
       <div class="adm-row">
         <input class="adm-inp" value="${esc(m.name)}" style="font-size:14px;color:var(--gold);font-weight:600" onchange="CASH_DATA.menus[${mi}].name=this.value;saveCash()">
@@ -1083,7 +1165,7 @@ function renderAdmMenus(body){
         <span style="font-size:12px;color:var(--txt3)">€</span>
         <button class="adm-btn danger" onclick="if(confirm('Supprimer ce menu ?')){CASH_DATA.menus.splice(${mi},1);saveCash();renderAdm();}">Supprimer</button>
       </div>
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">Sections — <span style="color:var(--gold)">●</span> Choix DB-Carte  <span style="color:var(--blue)">●</span> Option  <span style="color:var(--green)">●</span> Fixe inclus</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:8px"><span style="color:var(--blue)">●</span> Option oui/non  <span style="color:var(--green)">●</span> Inclus fixe</div>
       ${m.sections.map((s,si)=>`
         <div class="sec-adm-card">
           <div class="sec-adm-head">
@@ -1094,20 +1176,15 @@ function renderAdmMenus(body){
           <div class="adm-row" style="flex-wrap:wrap;gap:6px">
             <input class="adm-inp" value="${esc(s.name)}" placeholder="Nom" style="max-width:130px" onchange="CASH_DATA.menus[${mi}].sections[${si}].name=this.value;saveCash()">
             <select class="adm-sel" onchange="CASH_DATA.menus[${mi}].sections[${si}].type=this.value;saveCash();renderAdm()">
-              <option value="choice" ${s.type==='choice'?'selected':''}>Choix DB-Carte</option>
               <option value="option" ${s.type==='option'?'selected':''}>Option oui/non</option>
               <option value="fixed" ${s.type==='fixed'?'selected':''}>Inclus (fixe)</option>
             </select>
-            ${s.type!=='fixed'?`<label style="font-size:12px;color:var(--txt2);display:flex;align-items:center;gap:4px">
-              <input type="checkbox" ${s.required?'checked':''} onchange="CASH_DATA.menus[${mi}].sections[${si}].required=this.checked;saveCash()"> Obligatoire
-            </label>`:''}
             ${s.type==='option'?`<input class="adm-inp" type="number" value="${s.supPrice||0}" placeholder="Suppl. €" style="max-width:80px" onchange="CASH_DATA.menus[${mi}].sections[${si}].supPrice=parseFloat(this.value)||0;saveCash()"><span style="font-size:11px;color:var(--txt3)">€ suppl.</span>`:''}
           </div>
         </div>`).join('')}
       <div class="adm-row" style="margin-top:6px">
-        <input class="adm-inp" id="sec-name-${mi}" placeholder="Nom de la section (ex: Fromage)">
+        <input class="adm-inp" id="sec-name-${mi}" placeholder="Nom section (ex: Fromage)">
         <select class="adm-sel" id="sec-type-${mi}">
-          <option value="choice">Choix DB-Carte</option>
           <option value="option">Option oui/non</option>
           <option value="fixed">Inclus (fixe)</option>
         </select>
@@ -1115,9 +1192,9 @@ function renderAdmMenus(body){
       </div>
     </div>`).join('')+`
     <div class="adm-sec">
-      <div class="adm-sec-title">Créer un menu</div>
+      <div class="adm-sec-title">Créer un menu de secours</div>
       <div class="adm-row">
-        <input class="adm-inp" id="new-m-name" placeholder="Nom du menu (ex: Menu Prestige 7 services)">
+        <input class="adm-inp" id="new-m-name" placeholder="Nom du menu">
         <input class="adm-inp" type="number" id="new-m-price" placeholder="Prix €" style="max-width:90px" step="0.5" min="0">
         <button class="adm-btn primary" onclick="addMenu()">+ Menu</button>
       </div>
@@ -1238,17 +1315,24 @@ function loadCash(){
     if(raw){const d=JSON.parse(raw);if(d.menus&&d.menus[0]&&!d.menus[0].sections)localStorage.removeItem('db_cash_data');}
   }catch(_){}
   loadCash();loadOpenTables();loadSessionTickets();
-  CASH_DATA.menus.forEach(m=>initMenuSel(m.id));
   renderTables();
   const sbPass=await sbLoadSetting('db_cash_pass');
   if(sbPass){PASS=sbPass;localStorage.setItem('db_cash_pass',sbPass);}
   const sbConf=await sbLoad('db-cash-config');
-  if(sbConf?.menus){
-    sbConf.menus=migrateMenus(sbConf.menus);
+  if(sbConf&&(sbConf.carte!==undefined||sbConf.menuSource)){
+    sbConf.menus=migrateMenus(sbConf.menus||[]);
+    if(!sbConf.menuSource)sbConf.menuSource='carte'; // migration : par défaut DB-Carte
     CASH_DATA=sbConf;
     localStorage.setItem('db_cash_data',JSON.stringify(CASH_DATA));
-    CASH_DATA.menus.forEach(m=>initMenuSel(m.id));
     renderTables();
+  }
+  // Précharger DB-Carte en arrière-plan pour avoir les menus dès le premier tap
+  if(CASH_DATA.menuSource!=='manual'){
+    loadCarteIfNeeded().then(()=>{
+      getMenusSync().forEach(m=>{if(!MENU_SEL[m.id])initMenuSel(m.id);});
+    });
+  } else {
+    getMenusSync().forEach(m=>initMenuSel(m.id));
   }
 })();
 </script>
