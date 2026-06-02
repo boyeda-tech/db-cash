@@ -315,7 +315,7 @@
   </div>
   <div class="bottom-bar">
     <button class="btn-bar gold" onclick="openSheet('menus')">+ Menu</button>
-    <button class="btn-bar" onclick="openSheet('vins')">+ Vin</button>
+    <button class="btn-bar" onclick="openSheet('vins')">+ Cave</button>
     <button class="btn-bar" onclick="openSheet('divers')">+ Divers</button>
   </div>
 </div>
@@ -411,7 +411,7 @@
     </div>
     <div class="sheet-tabs" id="sheet-tabs">
       <button class="sheet-tab on" onclick="swSheetTab('menus',this)">Menus</button>
-      <button class="sheet-tab" onclick="swSheetTab('vins',this)">Vins</button>
+      <button class="sheet-tab" onclick="swSheetTab('vins',this)">Cave</button>
       <button class="sheet-tab" onclick="swSheetTab('divers',this)">Divers</button>
     </div>
     <div class="sheet-body" id="sheet-body"></div>
@@ -672,7 +672,8 @@ function toggleTestMode(){
 }
 
 // Tables globales pour éviter JSON.stringify dans les onclick (bug guillemets)
-let WINES_ARR = [];
+let WINES_ARR = [];     // liste plate pour la recherche (index = i dans onclick)
+let WINES_GROUPED = []; // structure [{label, sections:[{name, items:[{it,idx}]}]}]
 
 // ── Source des menus : DB-Carte (auto) ou Manuel (secours) ──
 // DB-Carte structure : { menus:[{id,name,priceTTC,tva,seqIds:[]}], sequences:[{id,name,fromage,priceExtra,dishes:[]}] }
@@ -720,13 +721,23 @@ async function renderSheetBody(){
     body.innerHTML='<div style="padding:24px;text-align:center;color:var(--txt3)">Chargement…</div>';
     if(!WINE_CACHE)WINE_CACHE=await sbLoad('db-wine');
     if(!WINE_CACHE){body.innerHTML='<div class="order-empty">DB-Wine non disponible</div>';return;}
-    WINES_ARR=[];
+    // Construire WINES_ARR (liste plate, indices stables) + WINES_GROUPED (hiérarchie)
+    WINES_ARR=[];WINES_GROUPED=[];
+    const catLabels={aperitifs:'Apéritifs',vins:'Vins',digestifs:'Digestifs & Spiritueux'};
     ['aperitifs','vins','digestifs'].forEach(k=>{
       const tab=WINE_CACHE[k];if(!tab)return;
+      const catSecs=[];
       tab.sections.forEach(sec=>{
-        const lists=sec.subsections?sec.subsections.map(s=>s.items||[]):[sec.items||[]];
-        lists.forEach(items=>items.forEach(it=>{if(it&&it.n&&it.stock!==0)WINES_ARR.push(it);}));
+        const subGroups=sec.subsections?sec.subsections:[{name:'',items:sec.items||[]}];
+        subGroups.forEach(sub=>{
+          const valid=(sub.items||[]).filter(it=>it&&it.n&&it.stock!==0);
+          if(!valid.length)return;
+          const secItems=valid.map(it=>{const idx=WINES_ARR.length;WINES_ARR.push(it);return{it,idx};});
+          const secName=[sec.name,sub.name].filter(Boolean).join(' — ');
+          catSecs.push({name:secName,items:secItems});
+        });
       });
+      if(catSecs.length)WINES_GROUPED.push({label:catLabels[k]||k,sections:catSecs});
     });
     if(!WINES_ARR.length){body.innerHTML='<div class="order-empty">Aucun vin disponible</div>';return;}
     renderWineList('');
@@ -769,36 +780,59 @@ function tapDivers(i){
   addItemCtx(it.name,it.price,it.tva,null);
 }
 
-// Recherche vins
-function renderWineList(query){
-  const body=document.getElementById('sheet-body');
-  const ctx=isEmp();
-  const q=query.toLowerCase().trim();
-  const filtered=q?WINES_ARR.filter(it=>{
-    const name=(it.n+' '+(it.v||'')+' '+(it.appellation||'')).toLowerCase();
-    return q.split(' ').every(w=>name.includes(w));
-  }):WINES_ARR;
-  let html=`<div style="padding:10px 16px 8px">
+// Barre de recherche commune aux deux modes d'affichage vins
+function wineSearchBar(query){
+  return`<div style="padding:10px 16px 8px;position:sticky;top:0;background:var(--bg2);z-index:10;border-bottom:1px solid var(--border)">
     <input class="a-inp" id="wine-search" placeholder="🔍 Rechercher (appellation, nom…)"
       oninput="renderWineList(this.value)" autocomplete="off" style="width:100%"
       value="${esc(query)}">
   </div>`;
+}
+
+function wineItemHtml(it,idx){
+  const ctx=isEmp();
+  const tva=it.tva||(it.nonAlcool?(ctx?5.5:10):20);
+  const name=it.n+(it.v?' '+it.v:'');
+  return`<div class="add-item" onclick="tapWine(${idx})">
+    <div><div class="ai-name">${esc(name)}</div>${it.fmt?`<div class="ai-meta">${esc(it.fmt)}</div>`:''}</div>
+    <div style="text-align:right"><div class="ai-price">${fmt(it.p||0)}</div><div class="ai-tva">TVA ${tva}%</div></div>
+  </div>`;
+}
+
+function renderWineList(query){
+  const body=document.getElementById('sheet-body');
+  const q=query.toLowerCase().trim();
+
+  if(!q){
+    // ── Vue groupée par catégorie / sous-section ──
+    let html=wineSearchBar('');
+    WINES_GROUPED.forEach(cat=>{
+      html+=`<div style="padding:9px 16px 6px;font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#fff;background:var(--gold)">${esc(cat.label)}</div>`;
+      cat.sections.forEach(sec=>{
+        html+=`<div style="padding:7px 16px 4px;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt3);background:var(--bg3);border-bottom:1px solid var(--border)">${esc(sec.name)}</div>`;
+        sec.items.forEach(({it,idx})=>{ html+=wineItemHtml(it,idx); });
+      });
+    });
+    body.innerHTML=html;
+    return;
+  }
+
+  // ── Vue recherche : liste plate filtrée ──
+  const filtered=WINES_ARR.reduce((acc,it,idx)=>{
+    const haystack=(it.n+' '+(it.v||'')+' '+(it.appellation||'')).toLowerCase();
+    if(q.split(' ').every(w=>haystack.includes(w)))acc.push({it,idx});
+    return acc;
+  },[]);
+
+  let html=wineSearchBar(query);
   if(!filtered.length){
     html+='<div style="padding:20px;text-align:center;color:var(--txt3);font-style:italic">Aucun résultat</div>';
   } else {
-    html+=filtered.map((it,fi)=>{
-      const i=WINES_ARR.indexOf(it);
-      const tva=it.tva||(it.nonAlcool?(ctx?5.5:10):20);
-      const name=it.n+(it.v?' '+it.v:'');
-      return`<div class="add-item" onclick="tapWine(${i})">
-        <div><div class="ai-name">${esc(name)}</div>${it.fmt?`<div class="ai-meta">${esc(it.fmt)}</div>`:''}</div>
-        <div style="text-align:right"><div class="ai-price">${fmt(it.p||0)}</div><div class="ai-tva">TVA ${tva}%</div></div>
-      </div>`;
-    }).join('');
+    html+=filtered.map(({it,idx})=>wineItemHtml(it,idx)).join('');
   }
   body.innerHTML=html;
-  // Remettre le focus sur le champ recherche si on vient de taper
-  if(query){const el=document.getElementById('wine-search');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
+  const el=document.getElementById('wine-search');
+  if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}
 }
 
 function tapWine(i){
