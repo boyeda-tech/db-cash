@@ -437,6 +437,11 @@ let PASS = localStorage.getItem('db_cash_pass')||'atelier';
 let TICKET_SEQ = parseInt(localStorage.getItem('db_cash_seq')||'0');
 let LAST_HASH = localStorage.getItem('db_cash_last_hash')||'0'.repeat(64);
 let SESSION_TICKETS = [];
+// Point de reprise journalier : état avant les tests du matin
+// Sauvegardé automatiquement au 1er démarrage de chaque journée
+let DAY_START_SEQ  = parseInt(localStorage.getItem('db_cash_day_seq') ||TICKET_SEQ);
+let DAY_START_HASH = localStorage.getItem('db_cash_day_hash')||LAST_HASH;
+let DAY_START_DATE = localStorage.getItem('db_cash_day_date')||'';
 let OPEN_TABLES = {};
 let CURRENT_ORDER = null;
 let EMP_CART = [];
@@ -953,7 +958,20 @@ async function valider(ttc){
 }
 
 function saveSessionTickets(){localStorage.setItem('db_cash_session',JSON.stringify({tickets:SESSION_TICKETS,date:new Date().toDateString()}));}
-function loadSessionTickets(){const r=localStorage.getItem('db_cash_session');if(!r)return;try{const s=JSON.parse(r);if(s.date===new Date().toDateString())SESSION_TICKETS=s.tickets||[];}catch(_){}}
+function loadSessionTickets(){
+  const today=new Date().toDateString();
+  const r=localStorage.getItem('db_cash_session');
+  if(r)try{const s=JSON.parse(r);if(s.date===today)SESSION_TICKETS=s.tickets||[];}catch(_){}
+  // Nouveau jour → sauvegarder l'état courant comme point de reprise (avant les tests du matin)
+  if(DAY_START_DATE!==today){
+    DAY_START_SEQ=TICKET_SEQ;
+    DAY_START_HASH=LAST_HASH;
+    DAY_START_DATE=today;
+    localStorage.setItem('db_cash_day_seq',String(DAY_START_SEQ));
+    localStorage.setItem('db_cash_day_hash',DAY_START_HASH);
+    localStorage.setItem('db_cash_day_date',DAY_START_DATE);
+  }
+}
 
 // ═══════════════════════════════════════════════════
 // TICKET
@@ -1269,15 +1287,16 @@ function renderAdmSettings(body){
       <div class="z-row"><span class="z-lbl">Tables ouvertes</span><span class="z-val">${Object.keys(OPEN_TABLES).length}</span></div>
       <button class="adm-btn danger" style="margin-top:10px" onclick="if(confirm('Clôturer la session ?')){SESSION_TICKETS=[];saveSessionTickets();renderAdm();toast('Session clôturée');}">Clôturer la session</button>
     </div>
-    <div class="adm-sec" style="border-color:var(--red)">
-      <div class="adm-sec-title" style="color:var(--red)">Effacer les tests — repartir à zéro</div>
+    <div class="adm-sec" style="border-color:var(--gold)">
+      <div class="adm-sec-title">Effacer les tests du matin</div>
       <div style="font-size:13px;color:var(--txt2);margin-bottom:12px;line-height:1.5">
-        À faire <strong>avant le premier vrai service</strong> pour que la comptabilité commence proprement.<br>
-        Efface tous les tickets de test, remet le numéro de ticket à 0 et repart la chaîne ISCA.
+        À faire chaque matin <strong>avant le début du vrai service</strong>.<br>
+        Supprime les tickets de test et remet les compteurs exactement à l'état de ce matin — comme si tu n'avais rien encaissé.
       </div>
-      <div class="z-row" style="margin-bottom:8px"><span class="z-lbl">Tickets à supprimer</span><span class="z-val" style="color:var(--red)">${SESSION_TICKETS.length}</span></div>
-      <div class="z-row" style="margin-bottom:12px"><span class="z-lbl">Compteur ticket actuel</span><span class="z-val" style="color:var(--red)">N°${TICKET_SEQ}</span></div>
-      <button class="adm-btn danger" style="width:100%;padding:12px;font-size:14px" onclick="resetPourVraiService()">🗑 Effacer les tests et repartir à N°1</button>
+      <div class="z-row" style="margin-bottom:4px"><span class="z-lbl">Tickets de test à supprimer</span><span class="z-val" style="color:var(--red)">${SESSION_TICKETS.length}</span></div>
+      <div class="z-row" style="margin-bottom:4px"><span class="z-lbl">Retour au ticket N°</span><span class="z-val">${DAY_START_SEQ}</span></div>
+      <div class="z-row" style="margin-bottom:12px"><span class="z-lbl">Compteur actuel</span><span class="z-val" style="color:var(--txt3)">N°${TICKET_SEQ}</span></div>
+      <button class="adm-btn primary" style="width:100%;padding:12px;font-size:14px" onclick="effacerTestsDuMatin()">🗑 Effacer les tests — reprendre au N°${DAY_START_SEQ}</button>
     </div>
     <div class="adm-sec"><div class="adm-sec-title">DB-Carte (sync)</div>
       <div style="font-size:13px;color:var(--txt2);margin-bottom:8px">Les menus sont chargés en temps réel depuis DB-Carte.</div>
@@ -1285,16 +1304,17 @@ function renderAdmSettings(body){
     </div>`;
 }
 function changePw(){const p1=document.getElementById('p1').value,p2=document.getElementById('p2').value;if(!p1||p1!==p2){toast('Mots de passe différents');return;}PASS=p1;localStorage.setItem('db_cash_pass',p1);sbSaveSetting('db_cash_pass',p1);toast('✓ Mot de passe modifié');}
-function resetPourVraiService(){
-  if(!confirm('Effacer tous les tickets de test et remettre le compteur à zéro ?\n\nCette action est irréversible — à faire uniquement avant le premier vrai service.'))return;
+function effacerTestsDuMatin(){
+  const n=SESSION_TICKETS.length;
+  if(!confirm(`Effacer ${n} ticket${n>1?'s':''} de test et revenir au N°${DAY_START_SEQ} ?`))return;
   SESSION_TICKETS=[];
-  TICKET_SEQ=0;
-  LAST_HASH='0'.repeat(64);
-  localStorage.setItem('db_cash_seq','0');
-  localStorage.setItem('db_cash_last_hash','0'.repeat(64));
+  TICKET_SEQ=DAY_START_SEQ;
+  LAST_HASH=DAY_START_HASH;
+  localStorage.setItem('db_cash_seq',String(TICKET_SEQ));
+  localStorage.setItem('db_cash_last_hash',LAST_HASH);
   saveSessionTickets();
   renderAdm();
-  toast('✓ Compteurs remis à zéro — prêt pour le premier vrai service');
+  toast('✓ Tests effacés — prêt pour le service');
 }
 
 // ═══════════════════════════════════════════════════
