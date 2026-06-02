@@ -700,6 +700,7 @@ function renderMenuCards(body,tva){
 }
 
 function menuCardInner(m,tva){
+  if(!m.sections)m.sections=[];
   const sel=MENU_SEL[m.id]||{};
   const dishes=getCarteDishesList();
   let price=m.price;
@@ -1161,20 +1162,53 @@ function changePw(){const p1=document.getElementById('p1').value,p2=document.get
 // PERSISTANCE
 // ═══════════════════════════════════════════════════
 function saveCash(){localStorage.setItem('db_cash_data',JSON.stringify(CASH_DATA));sbSave('db-cash-config',CASH_DATA);}
-function loadCash(){const r=localStorage.getItem('db_cash_data');if(r)try{const d=JSON.parse(r);if(d.menus&&d.carte)CASH_DATA=d;}catch(_){}}
+// Migration : ancien format items{entrees,plats,desserts} → nouveau format sections[]
+function migrateMenus(menus){
+  return (menus||[]).map(m=>{
+    if(m.sections)return m; // déjà bon
+    const it=m.items||{};
+    const secs=[];
+    if((it.entrees||[]).length||true)  secs.push({id:'s-'+m.id+'-e',name:'Entrée',   type:'choice',required:true, supPrice:0,source:'manual',manualChoices:(it.entrees||[]).map(x=>({id:x.id||x.name,name:x.name}))});
+    if((it.plats||[]).length||true)    secs.push({id:'s-'+m.id+'-p',name:'Plat',     type:'choice',required:true, supPrice:0,source:'manual',manualChoices:(it.plats||[]).map(x=>({id:x.id||x.name,name:x.name}))});
+    if((it.desserts||[]).length||true) secs.push({id:'s-'+m.id+'-d',name:'Dessert',  type:'choice',required:true, supPrice:0,source:'manual',manualChoices:(it.desserts||[]).map(x=>({id:x.id||x.name,name:x.name}))});
+    if((it.supplements||[]).length)    secs.push({id:'s-'+m.id+'-s',name:'Supplément',type:'option',required:false,supPrice:0,source:'manual',manualChoices:(it.supplements||[]).map(x=>({id:x.id||x.name,name:x.name,sup:x.sup}))});
+    return{...m,sections:secs};
+  });
+}
+function loadCash(){
+  const r=localStorage.getItem('db_cash_data');
+  if(r)try{
+    const d=JSON.parse(r);
+    if(d.menus&&d.carte){
+      d.menus=migrateMenus(d.menus);
+      CASH_DATA=d;
+    }
+  }catch(_){}
+}
 
 // ═══════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════
 (async()=>{
   updateDate();setInterval(updateDate,60000);
+  // Vider le cache local si format ancien (pas de sections)
+  try{
+    const raw=localStorage.getItem('db_cash_data');
+    if(raw){const d=JSON.parse(raw);if(d.menus&&d.menus[0]&&!d.menus[0].sections)localStorage.removeItem('db_cash_data');}
+  }catch(_){}
   loadCash();loadOpenTables();loadSessionTickets();
   CASH_DATA.menus.forEach(m=>initMenuSel(m.id));
   renderTables();
   const sbPass=await sbLoadSetting('db_cash_pass');
   if(sbPass){PASS=sbPass;localStorage.setItem('db_cash_pass',sbPass);}
   const sbConf=await sbLoad('db-cash-config');
-  if(sbConf?.menus){CASH_DATA=sbConf;localStorage.setItem('db_cash_data',JSON.stringify(CASH_DATA));CASH_DATA.menus.forEach(m=>initMenuSel(m.id));renderTables();}
+  if(sbConf?.menus){
+    sbConf.menus=migrateMenus(sbConf.menus);
+    CASH_DATA=sbConf;
+    localStorage.setItem('db_cash_data',JSON.stringify(CASH_DATA));
+    CASH_DATA.menus.forEach(m=>initMenuSel(m.id));
+    renderTables();
+  }
 })();
 </script>
 </body>
