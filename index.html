@@ -622,12 +622,7 @@ async function renderSheetBody(){
   if(SHEET_MODE==='menus'){
     if(!CASH_DATA.menus.length){body.innerHTML='<div class="order-empty">Aucun menu — voir Admin</div>';return;}
     const tva=isEmp()?5.5:10;
-    // Charger DB-Carte en arrière-plan si pas encore fait
-    if(!CARTE_CACHE){
-      body.innerHTML='<div style="padding:30px;text-align:center"><span class="spin"></span> Chargement…</div>';
-      CARTE_CACHE=await sbLoad('db-carte');
-    }
-    renderMenuCards(body,tva);
+    renderMenuList(body,tva);
   }
   else if(SHEET_MODE==='vins'){
     body.innerHTML='<div style="padding:30px;text-align:center"><span class="spin"></span> Chargement…</div>';
@@ -684,137 +679,135 @@ async function renderSheetBody(){
   }
 }
 
-// ── Rendu des cartes menus ──
-function getCarteDishesList(){
-  if(!CARTE_CACHE)return[];
-  const dishes=[];
-  (CARTE_CACHE.sequences||[]).forEach(seq=>(seq.dishes||[]).forEach(d=>{if(d&&d.name)dishes.push(d);}));
-  return dishes;
+// ── Liste menus simple ──
+// Affiche juste nom + prix. Tap → options + commentaire.
+let SELECTED_MENU_ID = null;
+
+function renderMenuList(body,tva){
+  // Si un menu est sélectionné, afficher son panneau options
+  if(SELECTED_MENU_ID){
+    const m=CASH_DATA.menus.find(x=>x.id===SELECTED_MENU_ID);
+    if(m){renderMenuOptions(body,m,tva);return;}
+    SELECTED_MENU_ID=null;
+  }
+  // Sinon liste simple
+  body.innerHTML=CASH_DATA.menus.map(m=>{
+    const opts=(m.sections||[]).filter(s=>s.type==='option');
+    const supTotal=opts.reduce((acc,s)=>acc+(s.supPrice||0),0);
+    return`<div class="add-item" onclick="selectMenu(${JSON.stringify(m.id)},${tva})">
+      <div>
+        <div class="ai-name">${esc(m.name)}</div>
+        ${opts.length?`<div class="ai-meta">${opts.map(s=>esc(s.name)+(s.supPrice>0?' +'+fmt(s.supPrice):'')).join(' · ')}</div>`:''}
+      </div>
+      <div style="text-align:right">
+        <div class="ai-price">${fmt(m.price)}</div>
+        <div class="ai-tva">TVA ${tva}%</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-function renderMenuCards(body,tva){
-  body.innerHTML=CASH_DATA.menus.map(m=>`
-    <div class="menu-card" id="mc-${m.id}">
-      ${menuCardInner(m,tva)}
-    </div>`).join('');
+function selectMenu(menuId,tva){
+  SELECTED_MENU_ID=menuId;
+  if(!MENU_SEL[menuId])initMenuSel(menuId);
+  const body=document.getElementById('sheet-body');
+  const m=CASH_DATA.menus.find(x=>x.id===menuId);
+  renderMenuOptions(body,m,tva);
 }
 
-function menuCardInner(m,tva){
+function renderMenuOptions(body,m,tva){
   if(!m.sections)m.sections=[];
   const sel=MENU_SEL[m.id]||{};
-  const dishes=getCarteDishesList();
+  const opts=(m.sections||[]).filter(s=>s.type==='option');
   let price=m.price;
-  // Ajouter suppléments des options cochées
-  m.sections.forEach(s=>{
-    if(s.type==='option'&&sel[s.id]==='oui'&&s.supPrice>0)price+=s.supPrice;
-    if(s.type==='choice'&&sel[s.id]&&sel[s.id]!=='skip'){
-      // supplement sur le choix lui-même (si choix manuel avec sup)
-      if(s.source==='manual'){const c=s.manualChoices.find(x=>x.id===sel[s.id]);if(c&&c.sup)price+=c.sup;}
-    }
-  });
-  return`
-    <div class="menu-card-name">${esc(m.name)}</div>
-    <div class="menu-card-price">${fmt(price)} · TVA ${tva}%</div>
-    ${m.sections.map(s=>sectionPicker(m.id,s,sel,dishes,tva)).join('')}
-    <button class="menu-add-btn" onclick="addMenuFromSheet(${JSON.stringify(m.id)},${tva})"
-      ${canAddMenu(m.id)?'':'disabled'}>Ajouter ce menu — ${fmt(price)}</button>`;
-}
+  opts.forEach(s=>{if(sel[s.id]==='oui'&&s.supPrice>0)price+=s.supPrice;});
 
-function sectionPicker(menuId,sec,sel,dishes,tva){
-  if(sec.type==='fixed'){
-    return`<div class="sec-hdr"><span class="sec-name">${esc(sec.name)}</span><span class="sec-badge" style="color:var(--green);border-color:var(--green)">Inclus</span></div>`;
-  }
-  if(sec.type==='option'){
-    const v=sel[sec.id];
-    return`<div class="sec-hdr">
-      <span class="sec-name">${esc(sec.name)}</span>
-      ${sec.supPrice>0?`<span class="sec-badge sup">+${fmt(sec.supPrice)}</span>`:``}
-    </div>
-    <div class="opt-row">
-      <div class="opt-btn${v==='oui'?' on-oui':''}" onclick="setMenuSel(${JSON.stringify(menuId)},${JSON.stringify(sec.id)},'oui',${tva})">Oui${sec.supPrice>0?' (+'+fmt(sec.supPrice)+')':''}</div>
-      <div class="opt-btn${v==='non'?' on-non':''}" onclick="setMenuSel(${JSON.stringify(menuId)},${JSON.stringify(sec.id)},'non',${tva})">Non merci</div>
+  let html=`
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+      <button onclick="SELECTED_MENU_ID=null;renderSheetBody()" style="background:none;border:none;font-size:18px;color:var(--txt3);cursor:pointer">←</button>
+      <div style="flex:1">
+        <div style="font-size:17px;color:var(--gold);font-weight:600">${esc(m.name)}</div>
+        <div style="font-size:12px;color:var(--txt3)">${fmt(price)} · TVA ${tva}%</div>
+      </div>
     </div>`;
+
+  if(opts.length){
+    html+=`<div style="padding:12px 16px 4px;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--txt3)">Options</div>`;
+    opts.forEach(s=>{
+      const v=sel[s.id];
+      html+=`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="flex:1">
+          <div style="font-size:15px">${esc(s.name)}</div>
+          ${s.supPrice>0?`<div style="font-size:11px;color:var(--gold)">+${fmt(s.supPrice)}</div>`:''}
+        </div>
+        <div style="display:flex;gap:8px">
+          <div onclick="setOpt(${JSON.stringify(m.id)},${JSON.stringify(s.id)},'oui',${tva})"
+            style="padding:7px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:1.5px solid ${v==='oui'?'var(--gold)':'var(--border-s)'};background:${v==='oui'?'#FFF9EE':'transparent'};color:${v==='oui'?'var(--gold)':'var(--txt2)'}">
+            Oui${s.supPrice>0?' +'+fmt(s.supPrice):''}
+          </div>
+          <div onclick="setOpt(${JSON.stringify(m.id)},${JSON.stringify(s.id)},'non',${tva})"
+            style="padding:7px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:1.5px solid ${v==='non'?'var(--border-s)':'var(--border)'};background:${v==='non'?'var(--bg3)':'transparent'};color:${v==='non'?'var(--txt2)':'var(--txt3)'}">
+            Non
+          </div>
+        </div>
+      </div>`;
+    });
   }
-  // type==='choice'
-  let choices=[];
-  if(sec.source==='carte'){
-    choices=dishes.map(d=>({id:d.id||d.name,name:d.name,desc:d.description||'',sup:0}));
-  } else {
-    choices=sec.manualChoices.map(c=>({...c,desc:''}));
-  }
-  const v=sel[sec.id];
-  const required=sec.required;
-  return`<div class="sec-hdr">
-    <span class="sec-name">${esc(sec.name)}</span>
-    ${!required?`<span class="sec-badge opt">Optionnel</span>`:''}
+
+  html+=`<div style="padding:12px 16px">
+    <div style="font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--txt3);margin-bottom:6px">Note / Allergie</div>
+    <textarea id="menu-comment" rows="2" placeholder="ex : sans gluten, allergie noix…"
+      style="width:100%;background:var(--bg);border:1px solid var(--border-s);border-radius:8px;padding:9px;font-size:14px;font-family:var(--serif);color:var(--txt);resize:none">${MENU_SEL[m.id]?._comment||''}</textarea>
   </div>
-  ${!required?`<div class="choice-row" onclick="setMenuSel(${JSON.stringify(menuId)},${JSON.stringify(sec.id)},'skip',${tva})">
-    <div class="radio skip${v==='skip'?' on':''}"></div>
-    <span class="choice-name" style="color:var(--txt3);font-style:italic">Passer cette étape</span>
-  </div>`:''}
-  ${choices.length===0?`<div style="padding:8px 0;font-size:12px;color:var(--txt3);font-style:italic">Aucun plat dans DB-Carte</div>`:''}
-  ${choices.map(c=>`<div class="choice-row" onclick="setMenuSel(${JSON.stringify(menuId)},${JSON.stringify(sec.id)},${JSON.stringify(c.id)},${tva})">
-    <div class="radio${v===c.id?' on':''}"></div>
-    <div style="flex:1;min-width:0">
-      <div class="choice-name">${esc(c.name)}</div>
-      ${c.desc?`<div class="choice-desc">${esc(c.desc.slice(0,80))}${c.desc.length>80?'…':''}</div>`:''}
-    </div>
-    ${c.sup>0?`<span class="choice-sup">+${fmt(c.sup)}</span>`:''}
-  </div>`).join('')}`;
+  <div style="padding:0 16px 16px">
+    <button onclick="addMenuFromSheet(${JSON.stringify(m.id)},${tva})"
+      style="width:100%;background:var(--gold);border:none;color:#fff;padding:14px;border-radius:10px;font-size:16px;font-family:var(--serif);cursor:pointer">
+      Ajouter — ${fmt(price)}
+    </button>
+  </div>`;
+  body.innerHTML=html;
 }
 
-function setMenuSel(menuId,secId,val,tva){
+function setOpt(menuId,secId,val,tva){
   if(!MENU_SEL[menuId])MENU_SEL[menuId]={};
   MENU_SEL[menuId][secId]=val;
-  // Re-render la carte de ce menu
+  const body=document.getElementById('sheet-body');
   const m=CASH_DATA.menus.find(x=>x.id===menuId);
-  const el=document.getElementById('mc-'+menuId);
-  if(m&&el)el.innerHTML=menuCardInner(m,tva);
-}
-
-function canAddMenu(menuId){
-  const m=CASH_DATA.menus.find(x=>x.id===menuId);if(!m)return false;
-  const sel=MENU_SEL[menuId]||{};
-  for(const s of m.sections){
-    if(s.type==='choice'&&s.required&&!sel[s.id])return false;
-    if(s.type==='option'&&sel[s.id]===null)return false; // doit avoir choisi oui ou non
-  }
-  return true;
+  if(m)renderMenuOptions(body,m,tva);
 }
 
 function addMenuFromSheet(menuId,tva){
   const m=CASH_DATA.menus.find(x=>x.id===menuId);if(!m)return;
+  if(!m.sections)m.sections=[];
   const sel=MENU_SEL[menuId]||{};
-  const dishes=getCarteDishesList();
   let price=m.price;
   const lines=[];
 
-  m.sections.forEach(s=>{
-    if(s.type==='fixed'){lines.push(s.name+' (inclus)');}
-    else if(s.type==='option'){
-      if(sel[s.id]==='oui'){
-        if(s.supPrice>0){price+=s.supPrice;lines.push(s.name+' (+'+fmt(s.supPrice)+')');}
-        else lines.push(s.name);
-      } else if(sel[s.id]==='non'){
-        lines.push('Sans '+s.name.toLowerCase());
-      }
-    }
-    else if(s.type==='choice'){
-      const v=sel[s.id];
-      if(v==='skip'||!v)return;
-      let name=v;
-      if(s.source==='carte'){const d=dishes.find(x=>(x.id||x.name)===v);if(d)name=d.name;}
-      else{const c=s.manualChoices.find(x=>x.id===v);if(c){name=c.name;if(c.sup)price+=c.sup;}}
-      lines.push(s.name+' : '+name);
+  // Options (fromage, etc.)
+  m.sections.filter(s=>s.type==='option').forEach(s=>{
+    if(sel[s.id]==='oui'){
+      if(s.supPrice>0){price+=s.supPrice;lines.push(s.name+' +'+fmt(s.supPrice));}
+      else lines.push(s.name);
+    } else if(sel[s.id]==='non'){
+      lines.push('Sans '+s.name.toLowerCase());
     }
   });
 
-  const meta=lines.join('\n');
+  // Commentaire / allergie
+  const commentEl=document.getElementById('menu-comment');
+  const comment=commentEl?commentEl.value.trim():'';
+  if(comment)lines.push('Note : '+comment);
+  // Sauvegarder commentaire dans sel
+  if(!MENU_SEL[menuId])MENU_SEL[menuId]={};
+  MENU_SEL[menuId]._comment=comment;
+
+  const meta=lines.join(' · ')||null;
+  SELECTED_MENU_ID=null;
   if(isEmp()){
-    EMP_CART.push(buildItem(m.name,price,tva,meta||null));
-    initMenuSel(menuId);updateEmpTotal();closeSheet();toast('✓ '+m.name+' ajouté');
+    EMP_CART.push(buildItem(m.name,price,tva,meta));
+    initMenuSel(menuId);updateEmpTotal();closeSheet();toast('✓ '+m.name);
   } else {
-    addItemToOrder(m.name,price,tva,meta||null);
+    addItemToOrder(m.name,price,tva,meta);
     initMenuSel(menuId);
   }
 }
