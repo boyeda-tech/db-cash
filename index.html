@@ -264,6 +264,12 @@
 </head>
 <body>
 
+<!-- BANDEAU MODE TEST (fixe, toutes vues) -->
+<div id="test-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:500;background:var(--red);color:#fff;text-align:center;padding:9px 16px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;font-family:var(--serif)">
+  🧪 Mode test actif — les tickets portent la mention TEST
+  <button onclick="toggleTestMode()" style="margin-left:14px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;padding:3px 12px;border-radius:20px;font-size:11px;cursor:pointer;font-family:var(--serif)">Quitter</button>
+</div>
+
 <!-- ACCUEIL -->
 <div class="view active" id="v-accueil">
   <div class="hdr">
@@ -276,6 +282,7 @@
   </div>
   <div class="bottom-bar">
     <button class="btn-bar" onclick="showZ()">📊 Z de caisse</button>
+    <button class="btn-bar" id="btn-test-mode" onclick="toggleTestMode()">🧪 Test</button>
     <button class="btn-bar" onclick="showLogin()">⚙</button>
   </div>
 </div>
@@ -437,6 +444,8 @@ let PASS = localStorage.getItem('db_cash_pass')||'atelier';
 let TICKET_SEQ = parseInt(localStorage.getItem('db_cash_seq')||'0');
 let LAST_HASH = localStorage.getItem('db_cash_last_hash')||'0'.repeat(64);
 let SESSION_TICKETS = [];
+let TEST_MODE = false;   // mode test : tickets marqués TEST, hors comptabilité
+let TEST_SEQ  = 0;       // compteur tickets de test (T-1, T-2…)
 // Point de reprise journalier : état avant les tests du matin
 // Sauvegardé automatiquement au 1er démarrage de chaque journée
 let DAY_START_SEQ  = parseInt(localStorage.getItem('db_cash_day_seq') ||TICKET_SEQ);
@@ -607,6 +616,30 @@ function closeSheet(){document.getElementById('add-sheet').style.display='none';
 function swSheetTab(mode,btn){SHEET_MODE=mode;document.querySelectorAll('.sheet-tab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');renderSheetBody();}
 function initMenuSel(menuId){MENU_SEL[menuId]={};const m=getMenusSync().find(x=>x.id===menuId);if(m)m.sections.forEach(s=>{MENU_SEL[menuId][s.id]=null;});}
 function isEmp(){return CURRENT_ORDER?.isEmporter}
+
+// ── Mode Test ──
+function toggleTestMode(){
+  if(TEST_MODE){
+    // Quitter le mode test
+    if(!confirm('Quitter le mode test ?\nTous les tickets de test disparaissent — la caisse repart comme si rien ne s\'était passé.'))return;
+    TEST_MODE=false;TEST_SEQ=0;
+    document.getElementById('test-banner').style.display='none';
+    document.getElementById('btn-test-mode').style.background='';
+    document.getElementById('btn-test-mode').style.color='';
+    document.getElementById('btn-test-mode').style.borderColor='';
+    document.body.style.paddingTop='';
+    toast('Mode test désactivé — caisse propre');
+  } else {
+    // Entrer en mode test
+    TEST_MODE=true;TEST_SEQ=0;
+    document.getElementById('test-banner').style.display='block';
+    document.getElementById('btn-test-mode').style.background='var(--red)';
+    document.getElementById('btn-test-mode').style.color='#fff';
+    document.getElementById('btn-test-mode').style.borderColor='var(--red)';
+    document.body.style.paddingTop='38px'; // espace pour le bandeau fixe
+    toast('🧪 Mode test actif — les additions portent la mention TEST');
+  }
+}
 
 // Tables globales pour éviter JSON.stringify dans les onclick (bug guillemets)
 let WINES_ARR = [];
@@ -948,8 +981,20 @@ function backToOrder(){if(CURRENT_ORDER?.isEmporter)showView('v-emporter');else 
 async function valider(ttc){
   const t=CURRENT_ORDER.isEmporter?{items:[...EMP_CART],covers:1,type:'emporter'}:OPEN_TABLES[CURRENT_ORDER.tableNum];
   const{ht,tva,tvaMap}=calcTotal(t.items);
+  const payment={method:PAY_METHOD,amount:PAY_METHOD==='especes'?parseFloat(document.getElementById('esp-amt')?.value||ttc):ttc};
+
+  if(TEST_MODE){
+    // ── Ticket de test : hors comptabilité, hors ISCA, hors Supabase ──
+    TEST_SEQ++;
+    const td={seq:'T-'+TEST_SEQ,date:new Date().toISOString(),type:CURRENT_ORDER.isEmporter?'emporter':'table',tableNum:CURRENT_ORDER.tableNum,covers:t.covers||1,items:t.items,ht,tva,ttc,tvaMap,payment,isTest:true};
+    if(!CURRENT_ORDER.isEmporter)delete OPEN_TABLES[CURRENT_ORDER.tableNum];else EMP_CART=[];
+    saveOpenTables();renderTicket(td);showView('v-ticket');
+    return;
+  }
+
+  // ── Ticket réel ──
   TICKET_SEQ++;localStorage.setItem('db_cash_seq',TICKET_SEQ);
-  const td={seq:TICKET_SEQ,date:new Date().toISOString(),type:CURRENT_ORDER.isEmporter?'emporter':'table',tableNum:CURRENT_ORDER.tableNum,covers:t.covers||1,items:t.items,ht,tva,ttc,tvaMap,payment:{method:PAY_METHOD,amount:PAY_METHOD==='especes'?parseFloat(document.getElementById('esp-amt')?.value||ttc):ttc}};
+  const td={seq:TICKET_SEQ,date:new Date().toISOString(),type:CURRENT_ORDER.isEmporter?'emporter':'table',tableNum:CURRENT_ORDER.tableNum,covers:t.covers||1,items:t.items,ht,tva,ttc,tvaMap,payment};
   td.hash=await chainedHash(td);td.prevHash=LAST_HASH;
   SESSION_TICKETS.push(td);saveSessionTickets();
   await sbSave('db-cash',{tickets:SESSION_TICKETS,date:new Date().toDateString()});
@@ -982,9 +1027,21 @@ function renderTicket(t){
   const d=new Date(t.date);
   const ds=d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   const ml={cb:'Carte bancaire',especes:'Espèces',cheque:'Chèque'};
+
+  const testBanner=t.isTest?`
+    <div style="background:#B71C1C;color:#fff;text-align:center;padding:10px 8px;margin:-20px -20px 14px;border-radius:8px 8px 0 0">
+      <div style="font-size:22px;font-weight:bold;letter-spacing:.3em">⚠ TEST ⚠</div>
+      <div style="font-size:9px;letter-spacing:.2em;margin-top:2px">DOCUMENT NON VALABLE — USAGE INTERNE</div>
+    </div>`:'';
+
+  const seqLabel=t.isTest
+    ?`<span style="color:#B71C1C;font-weight:bold">TEST N° ${t.seq}</span>`
+    :`Ticket N° ${String(t.seq).padStart(6,'0')}`;
+
   const html=`
+    ${testBanner}
     <div class="tk-logo"><div class="tk-name">L'Atelier Privé</div><div class="tk-sub">David Boyer · Restaurant gastronomique</div></div>
-    <div class="tk-info">${typeLabel}<br>${ds}<br>Ticket N° ${String(t.seq).padStart(6,'0')}</div>
+    <div class="tk-info">${typeLabel}<br>${ds}<br>${seqLabel}</div>
     <div class="tk-items">
       ${t.items.map(it=>`
         <div class="tk-item"><span class="tk-item-name">${esc(it.name)}</span><span class="tk-item-qty">×${it.qty}</span><span class="tk-item-price">${fmt(it.price*it.qty)}</span></div>
@@ -998,8 +1055,10 @@ function renderTicket(t){
     </div>
     <div class="tk-tva">${Object.entries(t.tvaMap).map(([r,v])=>`<div class="tk-tva-row"><span>TVA ${r}%</span><span>Base ${fmt(v.base)} / TVA ${fmt(v.tva)}</span></div>`).join('')}</div>
     <div class="tk-pay">Mode de règlement : ${ml[t.payment.method]||t.payment.method}</div>
-    <div class="tk-footer">Merci de votre visite — L'Atelier Privé de David Boyer<br>Document fiscal conforme aux exigences légales<br>N° TVA intracommunautaire : à compléter</div>
-    <div class="tk-hash">ISCA · N°${t.seq} · ${t.hash.slice(0,32)}…</div>`;
+    ${t.isTest
+      ?`<div style="border:2px dashed #B71C1C;padding:6px;text-align:center;font-size:9px;color:#B71C1C;letter-spacing:.15em;margin-top:8px">DOCUMENT DE TEST — NON COMPTABILISÉ</div>`
+      :`<div class="tk-footer">Merci de votre visite — L'Atelier Privé de David Boyer<br>Document fiscal conforme aux exigences légales<br>N° TVA intracommunautaire : à compléter</div>
+    <div class="tk-hash">ISCA · N°${t.seq} · ${t.hash?.slice(0,32)}…</div>`}`;
   document.getElementById('ticket-paper').innerHTML=html;
   document.getElementById('print-ticket').innerHTML=html;
 }
