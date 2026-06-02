@@ -479,8 +479,9 @@ let LAST_TICKET = null;
 let LAST_TICKET_HTML = '';  // HTML ticket pour impression nouvel onglet
 
 // Styles autonomes pour la page d'impression (indépendant du CSS de l'app)
-const PRINT_STYLES=`*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Georgia,serif;background:#fff;color:#1a1a1a;max-width:380px;margin:0 auto;padding:20px}
+const PRINT_STYLES=`@page{margin:12mm;size:A4}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,serif;background:#fff;color:#1a1a1a;max-width:340px;margin:0 auto;padding:0}
 .tk-logo{text-align:center;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:12px}
 .tk-name{font-size:22px;font-weight:300;letter-spacing:.1em}
 .tk-sub{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#888;margin-top:2px}
@@ -504,9 +505,14 @@ body{font-family:Georgia,serif;background:#fff;color:#1a1a1a;max-width:380px;mar
 function doPrint(contentHtml){
   const page=`<!DOCTYPE html><html lang="fr"><head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Ticket — L'Atelier Privé</title>
-    <style>${PRINT_STYLES}</style>
-  </head><body>${contentHtml}
+    <title>L'Atelier Privé</title>
+    <style>${PRINT_STYLES}
+    #print-hint{font-family:sans-serif;font-size:11px;color:#aaa;text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px dotted #eee}
+    @media print{#print-hint{display:none}}
+    </style>
+  </head><body>
+  <div id="print-hint">💡 Pour supprimer la date et l'URL en bas de page : désactiver <strong>En-têtes et pieds de page</strong> dans les options d'impression</div>
+  ${contentHtml}
   <script>window.onload=function(){setTimeout(function(){window.print();},350)};<\/script>
   </body></html>`;
   const blob=new Blob([page],{type:'text/html'});
